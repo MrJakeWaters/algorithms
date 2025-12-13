@@ -3,6 +3,13 @@ import uuid
 import math
 
 
+class SplitNode:
+    def __init__(self, left, right, center):
+        self.current_values = left
+        self.leaf_node_values = right
+        self.parent_value = center
+
+
 class Node:
     def __init__(self, values=None, max_value_size=4):
         # set base attributes
@@ -16,8 +23,8 @@ class Node:
         self.max_value_size = max_value_size
         self.min_value_size = math.floor(self.max_value_size/2)
         self.leaf_nodes = []
-        self.next = None
-        self.previous = None
+        self.child = None
+        self.parent = None
 
         # add value if required
         if values is not None and len(values) > 0:
@@ -44,9 +51,9 @@ class Node:
         # recursive searches to find the node, inside the nested nodes, where the value should be inserted
         node = self
         while len(node.leaf_nodes) != 0:
-            node.leaf_nodes[self.get_insert_index(value)].previous = node # set the previous value to be able to traverse back
-            node.next = node.leaf_nodes[self.get_insert_index(value)] # set next to the indexed node
-            node = node.next
+            node.leaf_nodes[self.get_insert_index(value)].parent = node # set the.parent value to be able to traverse back
+            node.child = node.leaf_nodes[self.get_insert_index(value)] # set.child to the indexed node
+            node = node.child
         return node
 
 
@@ -78,15 +85,12 @@ class Node:
     def split(self):
         # set split values
         split_index = math.floor(len(self.values)/2)
-        center = [self.values[split_index]]
+        center = self.values[split_index]
         left = self.values[:split_index]
         right = self.values[split_index+1:]
 
-        # update current node values
-        self.values = left
-
         # return values that will go to leaf_nodes or parent node
-        return center, right
+        return SplitNode(left, right, center)
         
 
 class Btree:
@@ -94,9 +98,21 @@ class Btree:
         self.node = node
 
 
+    def get_level_min(self, level):
+        # get min value for a particular level within the tree
+        node = self.node
+
+        if len(node.leaf_nodes) > 0:
+            for x in range(level):
+                node = node.leaf_nodes[0]
+
+        # get the smallest value (b/c it's sorted this is the first value)
+        return node.values[0]
+
+
     def display(self, level, node):
         # print values
-        print('[%s, %s] %s> %s' % (node.leaf_index, node.id, '-'*level, ','.join([str(x) for x in node.values])))
+        print('[%s, %s] %s> %s' % (node.leaf_index, node.id, '----'*level, ','.join([str(x) for x in node.values])))
 
         # recursive call of each node
         for leaf_node in node.leaf_nodes:
@@ -105,25 +121,44 @@ class Btree:
 
     def insert(self, value):
         # traverse to the bottom of the tree and add the value
-        insert_node = self.node.traverse(value)
-        insert_node.add(value)
+        current_node = self.node.traverse(value)
+        current_node.add(value)
 
         # split the node if there are too many values
-        while len(insert_node.values) > insert_node.max_value_size:
-            add_value, leaf_node_values = insert_node.split()
+        while len(current_node.values) > current_node.max_value_size:
+            split_node = current_node.split() # this returns SplitNode object storing parent_value, leaf_node_values and current_values
 
             # check if the parent node is empty and create if it doesn't exists
             # otherwise traverse back up the tree splitting where necessary
-            if insert_node.previous is None:
+            if current_node.parent is None:
                 # create a parent node
-                insert_node.previous = Node(add_value)
+                current_node.parent = Node([split_node.parent_value])
 
-                # set to the parent node and update it's leaf nodes
-                self.node = insert_node.previous
-                for i, x in enumerate([insert_node, Node(leaf_node_values)]):
-                    self.node.add_leaf_node(x)
+                # update leaf nodes of newly created parent
+                current_node.parent.add_leaf_node(current_node) # move current node to the leaf nodes in the parent
 
+                # make btree node equal to the newly created parent
+                self.node = current_node.parent
             else:
-                insert_node.previous.add(add_value[0]) # add value
-                insert_node.previous.add_leaf_node(Node(leaf_node_values)) # add leaf node
-                insert_node = insert_node.previous
+                current_node.parent.add(split_node.parent_value)
+
+            # create new leaf node and add it to parent leaves
+            new_leaf_node = Node(split_node.leaf_node_values)
+            current_node.parent.add_leaf_node(new_leaf_node)
+
+            # update parent node with split value
+            current_node.values = split_node.current_values # updating current node (this removes the last math.floor(self.max_value_size/2)+1 values from the array)
+
+            # if there are nested leaf nodes within the current_node they need to be properly
+            # separated so the current_node takes only half and newly added node take the other half
+            if len(current_node.leaf_nodes) > 0:
+                leaf_node_split_index = len(current_node.parent.values) + 1 # index that splits the leaf node array to what's going to new_node
+                new_leaf_node.leaf_nodes = current_node.leaf_nodes[:leaf_node_split_index]
+                current_node.leaf_nodes = current_node.leaf_nodes[leaf_node_split_index:] # move last x values to new_node 
+
+                # reindex each updated nodes
+                new_leaf_node.reindex()
+                current_node.reindex()
+
+            # update current_node for loop
+            current_node = current_node.parent
